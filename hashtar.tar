@@ -1,0 +1,361 @@
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Linq;
+using HashCode2020.models;
+using HashCode2020;
+using System.Diagnostics;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
+
+namespace HashCode2021
+{
+    public static class InputReader
+    {
+        public static Model Read(string file)
+        {
+            var lines = File.ReadAllLines($"../../../input/{file}");
+
+            // ================ CUSTOM INPUT READ START =========================
+            var (duration, P, S, C, bonus) = lines[0].Split5();
+
+
+            var places = new Dictionary<int, Place>();
+            var streets = new Dictionary<string, Street>();
+
+            for(int i = 0; i < S; i++)
+            {
+                var (orig, dest, name, cost) = lines[i + 1].Split4<int,int,string,int>();
+
+                if (!places.ContainsKey(orig))
+                {
+                    places.Add(orig, new Place(orig));
+                }
+
+                if (!places.ContainsKey(dest))
+                {
+                    places.Add(dest, new Place(dest));
+                }
+                var originPlace = places[orig];
+                var destPlace = places[dest];
+
+                var street = new Street(name, cost, orig, dest);
+                streets.Add(name, street);
+
+                destPlace.inDestinations.Add(orig, originPlace);
+                destPlace.inStreets.Add(name, street);
+
+                originPlace.outDestinations.Add(dest, destPlace);
+                originPlace.outStreets.Add(name, street);
+            }
+
+            var cars = new Dictionary<int, Car>();
+            for (int i = 0; i < C; i++)
+            {
+                var split = lines[i + 1 + S].Split(" ");
+                var car = new Car(i);
+                foreach (var street in split.Skip(1))
+                {
+                    car.route.Add(streets[street]);
+                }
+                cars.Add(i, car);
+            }
+
+            // Log info about the model
+            L.Log($"duration: {duration}, intersections: {P}, streets: {S}, cars: {C}, bonus: {bonus}");
+
+
+
+            return new Model(cars, places, duration, bonus);
+            // ================ CUSTOM INPUT READ END =========================
+        }
+    }
+}
+../OutputWriter.cs000666 000000 000000 00000003071 14015772575 012505 0ustar00000000 000000 ﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using static HashCode2021.Solver;
+
+namespace HashCode2021
+{
+    internal static class OutputWriter
+    {
+        internal static string Write(string file, Result r, Rating rating)
+        {
+            var lines = new List<string>();
+
+            // ================ CUSTOM OUTPUT WRITE START =========================
+            // Just fill "lines" variable with each line to be outputed on file
+
+            var placesWithSchedules = r.places.Where(p => p.schedules != null && p.schedules.Count > 0).ToList();
+
+            lines.Add(placesWithSchedules.Count.ToString());
+
+            foreach(var place in placesWithSchedules)
+            {
+                lines.Add($"{place.id}");
+                lines.Add($"{place.schedules.Count}");
+
+                foreach (var schedule in place.schedules)
+                {
+                    lines.Add($"{schedule.street.id} {schedule.time}");
+                }
+            }
+
+            // ================ CUSTOM OUTPUT WRITE END =========================
+
+            return Save(file, lines, rating);
+        }
+
+        private static string Save(string file, List<string> lines, Rating rating)
+        {
+            var path = $"../../../output/";
+            var fileName = $"{path}{file}";
+
+            if (!Directory.Exists(path)) Directory.CreateDirectory(path);
+
+            if (rating.GetNewBest().Contains(file)) File.WriteAllLines(fileName, lines);
+
+            return fileName;
+        }
+    }
+}../Program.cs000666 000000 000000 00000003507 14015757105 011413 0ustar00000000 000000 ﻿using HashCode2020;
+using HashCode2020.models;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+
+namespace HashCode2021
+{
+    class Program
+    {
+        private static readonly HashSet<string> files = new HashSet<string> { "a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt" };
+        //private static readonly HashSet<string> files = new HashSet<string> { "c.txt" };
+
+        static void Main(string[] args)
+        {
+            Console.WriteLine("HashCode 2021 - Br = Hu3^2\n");
+            var ratingService = new Rating(files);
+
+            var iteration = 1;
+            while (iteration-- > 0 )
+            {
+                L.LogA($"#{iteration}");
+
+                foreach (var file in files)
+                {
+                    L.Log($"Processing {file}");
+
+                    var model = InputReader.Read(file);
+                    L.Log($"Read input");
+
+                    var solver = new Solver(file);
+                    
+                    var result = solver.Solve(model);
+                    L.Log($"Calculated result");
+
+                    var score = ratingService.Calculate(file, result);
+                    L.Log($"Calculated score: {score}");
+
+                    var outputFile = OutputWriter.Write(file, result, ratingService);
+                    L.Log($"Generated output: {outputFile}\n");
+                }
+
+                Utils.WriteSummary();
+            }
+
+            Console.ReadLine();
+        }        
+    }
+
+    public static class L
+    {
+        static readonly bool enabled = true;
+        public static void Log(string msg)
+        {
+            if (enabled) Console.WriteLine(msg);
+        }
+        public static void LogA(string msg)
+        {
+            Console.WriteLine(msg);
+        }
+    }
+}
+../Rating.cs000666 000000 000000 00000007344 14015772464 011240 0ustar00000000 000000 ﻿using HashCode2020.models;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using static HashCode2021.Solver;
+
+namespace HashCode2021
+{
+    internal class Rating
+    {
+        private Dictionary<string, (int score, bool best)> ratings = new Dictionary<string, (int, bool)>();
+        private string PATH = "../../../ratings.txt";
+
+        public Rating(HashSet<string> files)
+        {
+            if (!File.Exists(PATH))
+            {
+                File.WriteAllLines(PATH, files.Select(f => $"{f} -1").ToArray());
+            }
+
+            var lines = File.ReadAllLines(PATH);
+
+            foreach(var line in lines)
+            {
+                var (file, score) = line.Split2<string,int>(" ");
+                ratings[file] = (score, false);
+            }
+        }
+
+        internal int Calculate(string file, Result r)
+        {
+            // ================ CUSTOM SCORE CALCULATION START =========================
+            // Just fill score variable
+            
+            var score = 0;
+
+            // steps:
+            // create list of lights
+
+            // every second:
+            //      iterate over lights that are green, and advance each car
+            //      if car reaches destination, increment total score
+            //      decrement 1 second of every light, turning to red if necessary, and next one to green
+
+            var placesWithSchedules = r.places.Where(place => place.schedules != null && place.schedules.Count > 0);
+            var lights = new List<Light>();
+
+            foreach (var place in placesWithSchedules)
+            {
+                foreach (var schedule in place.schedules)
+                {
+                    //get all cars that start in that street
+                    var cars = r.cars.Where(car => car.route[0] == schedule.street).ToList();
+
+                    // if this schedule is the first of the place
+                    bool isFirst = place.schedules[0] == schedule;
+
+                    lights.Add(new Light(schedule.street, cars, isFirst, schedule.time));
+                }
+            }
+
+            for (int i = 0; i < r.seconds; i++)
+            {
+                foreach (var light in lights.Where(l => l.isGreen && l.cars.Count > 0))
+                {
+                    var car = light.cars[0];
+                    light.cars.RemoveAt(0);
+
+                    //var next
+                    // turn into 
+                }
+            }
+
+            // Log info about the result
+            L.Log($"any insight about the score...(duplicates, unused)");
+            // ================ CUSTOM SCORE CALCULATION END =========================
+
+            Print(file, score);
+            Save(file, score);
+            return score;
+        }
+
+        private void Print(string file, int score)
+        {
+            char symbol = '=';
+            var color = ConsoleColor.DarkGray;
+            if (score > ratings[file].score) { symbol = '+'; color = ConsoleColor.Green; }
+            else if (score < ratings[file].score) { symbol = '-'; color = ConsoleColor.Red; }
+
+            var msg = $"{file}: {score} ([{symbol}{Math.Abs(score - ratings[file].score)}])";
+            Utils.AddSummary(msg, color);
+            Utils.AddTotal(score);
+        }
+                
+        private void Save(string file, int score) 
+        {
+            if (score > ratings[file].score)
+            {
+                ratings[file] = (score, true);
+                File.WriteAllLines(PATH, ratings.Select(r => $"{r.Key} {r.Value.score}").ToArray());
+            }            
+        }
+
+        public HashSet<string> GetNewBest()
+        {
+            return ratings.Where(r => r.Value.best).Select(r => r.Key).ToHashSet();
+        }
+    }
+}../Solver.cs000666 000000 000000 00000004011 14015773055 011247 0ustar00000000 000000 ﻿using HashCode2020;
+using HashCode2020.models;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+
+namespace HashCode2021
+{
+    internal partial class Solver
+    {
+        private readonly string file;
+
+        public Solver(string file)
+        {
+            this.file = file;
+        }
+
+        public Result Solve(Model m)
+        {
+            return file switch
+            {
+                "a.txt" => SolveGeneric(m),
+                _ => SolveGeneric(m),
+            };
+        }
+
+        public Result SolveGeneric(Model m)
+        {
+            // ================ CUSTOM SOLVER START =========================            
+            //var bestLibraries = m.libraries.Values.OrderByDescending(l => l.maxPotentialScore).ToList();
+            //var resultLibraries = new List<Street>();
+
+            foreach (var car in m.cars)
+            {
+                foreach(var street in car.Value.route)
+                {
+                    street.countCarsPassingBy += 1;
+                }
+            }
+
+            foreach (var place in m.places.Values)
+            {
+                var streets = place.inStreets.Values;
+                var totalCarsPassingByIntersec = streets.Select(s => s.countCarsPassingBy).Sum();
+                foreach(var street in streets)
+                {
+                    var time = (float)street.countCarsPassingBy / totalCarsPassingByIntersec;
+                    if (time < 1) { time *= 10; }
+                    place.schedules.Add(new Schedule(street, (int)time));
+                }
+            }
+            
+            return new Result(m.places.Values.ToList(), m.duration, m.bonus, m.cars.Values.ToList());
+            // ================ CUSTOM SOLVER END =========================
+        }
+
+        // Use in case of expensive loops
+        //var timer = new Stopwatch();
+        //timer.Start();
+        //while(condition && timer.ElapsedMilliseconds< 1000 * 5)
+        //{
+
+        //}
+    }
+}
